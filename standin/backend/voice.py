@@ -2,6 +2,7 @@
 import subprocess, tempfile, os
 from faster_whisper import WhisperModel
 import config
+import sys, pathlib
 
 _whisper = None
 
@@ -21,12 +22,20 @@ def transcribe(audio_bytes: bytes, suffix=".webm", language=None) -> str:
 
 
 def synthesize(text: str) -> bytes:
-    """Returns WAV bytes using the piper CLI installed by `pip install piper-tts`."""
+    """Returns WAV bytes by running Piper through the same Python that runs the server."""
+    model = pathlib.Path(config.PIPER_VOICE)
+    if not model.is_absolute():
+        model = pathlib.Path(__file__).parent / model   # always relative to the backend folder
     out = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     out.close()
     try:
-        subprocess.run(["piper", "--model", config.PIPER_VOICE, "--output_file", out.name],
-                       input=text.encode("utf8"), check=True, capture_output=True)
-        return open(out.name, "rb").read()
+        try:
+            subprocess.run([sys.executable, "-m", "piper", "--model", str(model),
+                            "--output_file", out.name],
+                           input=text.encode("utf8"), check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(e.stderr.decode("utf8", "ignore")[-300:])
+        with open(out.name, "rb") as f:
+            return f.read()
     finally:
         os.unlink(out.name)

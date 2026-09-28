@@ -60,3 +60,37 @@ def ask(body: Ask):
     sources = ["General Java knowledge (not from slides)"] if general \
         else sorted({n["source"] for n in notes})
     return {"type": "ans", "text": text, "cat": None, "sources": sources, "general": general}
+@app.post("/api/stt")
+async def stt(file: UploadFile = File(...), language: str | None = None):
+    text = voice.transcribe(await file.read(), language=language)
+    return {"text": text}
+
+
+@app.post("/api/tts")
+def tts(body: dict):
+    try:
+        wav = voice.synthesize(str(body.get("text", ""))[:1200])
+    except Exception as e:
+        raise HTTPException(503, f"Piper failed: {e}")
+    return Response(wav, media_type="audio/wav")
+
+
+@app.get("/api/rules")
+def get_rules():
+    return [{"cat": r["cat"], "why": r["why"], "do": r["do"]} for r in rules.RULES]
+
+
+@app.post("/api/review")
+def add_review(r: Review):
+    with REVIEWS.open("a", encoding="utf8") as f:
+        f.write(json.dumps({**r.model_dump(), "t": time.time()}, ensure_ascii=False) + "\n")
+    return {"ok": True}
+
+
+@app.get("/api/review")
+def list_reviews():
+    if not REVIEWS.exists():
+        return {"items": [], "agree": 0, "disagree": 0, "should_escalate": 0}
+    items = [json.loads(l) for l in REVIEWS.read_text(encoding="utf8").splitlines() if l.strip()]
+    c = lambda m: sum(i["mark"] == m for i in items)
+    return {"items": items, "agree": c("agree"), "disagree": c("disagree"), "should_escalate": c("should_escalate")}
